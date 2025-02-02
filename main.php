@@ -30,22 +30,6 @@
 error_reporting(E_ALL);
 ini_set('display_errors', 1);
 
-// Check if cURL extension is installed
-if (!extension_loaded('curl')) {
-    $installInstructions = "Error: PHP cURL extension is not installed.\n\n";
-    $installInstructions .= "Installation instructions:\n\n";
-    $installInstructions .= "For Windows:\n";
-    $installInstructions .= "1. Open php.ini file\n";
-    $installInstructions .= "2. Uncomment extension=curl\n";
-    $installInstructions .= "3. Restart your web server\n\n";
-    $installInstructions .= "For Linux (Ubuntu/Debian):\n";
-    $installInstructions .= "sudo apt-get install php-curl\n";
-    $installInstructions .= "sudo service apache2 restart\n\n";
-    $installInstructions .= "For macOS:\n";
-    $installInstructions .= "1. Using Homebrew: brew install php@8.x\n";
-    $installInstructions .= "2. Or modify php.ini to enable curl extension\n";
-    die($cl['red'] . $installInstructions . $cl['rt']);
-}
 
 // Define ANSI color codes
 $Colors = [
@@ -69,6 +53,23 @@ $Colors = [
     'Dim'   => "\x1b[2m",
     'RESET' => "\x1b[0m"
 ];
+
+// Check if cURL extension is installed
+if (!extension_loaded('curl')) {
+    $installInstructions = "Error: PHP cURL extension is not installed.\n\n";
+    $installInstructions .= "Installation instructions:\n\n";
+    $installInstructions .= "For Windows:\n";
+    $installInstructions .= "1. Open php.ini file\n";
+    $installInstructions .= "2. Uncomment extension=curl\n";
+    $installInstructions .= "3. Restart your web server\n\n";
+    $installInstructions .= "For Linux (Ubuntu/Debian):\n";
+    $installInstructions .= "sudo apt-get install php-curl\n";
+    $installInstructions .= "sudo service apache2 restart\n\n";
+    $installInstructions .= "For macOS:\n";
+    $installInstructions .= "1. Using Homebrew: brew install php@8.x\n";
+    $installInstructions .= "2. Or modify php.ini to enable curl extension\n";
+    die($Colors['Red'] . $installInstructions . $Colors['rt']);
+}
 
 $CoderMarkPrinted = false;
 
@@ -135,7 +136,6 @@ function logMessage($message = "", $messageType = "info", $currentAccount = 0, $
     $logColor = isset($colors[$messageType]) ? $colors[$messageType] : $colors['info'];
     $line = str_repeat('―', 70);
     echo $line . PHP_EOL;
-    // Note: The original JS code had a small typo in message formatting; adjusted accordingly.
     echo "{$Colors['Dim']}[{$timestamp}] {$Colors['RESET']}{$Colors['Gold']}> {$logColor}{$message}{$Colors['RESET']}" . PHP_EOL;
     echo $line . PHP_EOL;
 }
