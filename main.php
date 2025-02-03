@@ -30,7 +30,6 @@
 error_reporting(E_ALL);
 ini_set('display_errors', 1);
 
-
 // Define ANSI color codes
 $Colors = [
     'bl'    => "\x1b[38;5;27m",
@@ -84,9 +83,6 @@ $BANDWIDTH_SHARE_URL = 'https://api.openloop.so/bandwidth/share';
 function TASK_URL($missionId) {
     return "https://api.openloop.so/missions/{$missionId}/complete";
 }
-
-// Mission IDs for tasks
-$MISSION_IDS = [10, 11, 12, 13, 14, 15, 16, 18, 24];
 
 // User Agents Array
 $userAgents = [
@@ -291,6 +287,12 @@ function makeRequest($params) {
     curl_setopt($ch, CURLOPT_RETURNTRANSFER, true);
     curl_setopt($ch, CURLOPT_TIMEOUT, $timeout);
     curl_setopt($ch, CURLOPT_HTTPHEADER, $headersArray);
+/**
+ * Enable this code if you have problems with SSL certificate issues.
+ */    
+    // Disable SSL peer verification to solve certificate issues.
+    // curl_setopt($ch, CURLOPT_SSL_VERIFYHOST, 0);
+    // curl_setopt($ch, CURLOPT_SSL_VERIFYPEER, 0);
     
     // Set method and data for POST
     if ($method === 'POST') {
@@ -315,8 +317,10 @@ function makeRequest($params) {
         return null;
     }
     curl_close($ch);
+    
+    // Attempt to decode JSON. If not JSON, return raw response.
     $decoded = json_decode($response, true);
-    return $decoded;
+    return $decoded !== null ? $decoded : $response;
 }
 
 /**
@@ -369,10 +373,24 @@ function loginAllAccounts() {
 }
 
 /**
- * Option 2: Complete Task All Accounts
+ * Complete Task All Accounts
+ *
+ * For each account, retrieve the missions list using GET request.
+ * For every mission with status "available", perform:
+ *  - A GET request to the mission's social link.
+ *  - Then, complete the mission in two steps:
+ *      1. First, send an OPTIONS request to the mission complete endpoint without the Authorization header.
+ *         This request includes headers to simulate a CORS preflight and waits for 10 seconds.
+ *      2. Second, send a GET request to the mission complete endpoint with the Authorization header.
+ *         This finalizes the mission completion.
+ *
+ * Additionally, after processing all missions for an account:
+ *  - If no mission is available from the start, log that all tasks are already complete.
+ *  - If available missions were processed and all completed successfully, log that all tasks have been completed.
+ *  - Otherwise, log the number of tasks that could not be completed.
  */
 function completeTaskAllAccounts() {
-    global $COMMON_HEADERS, $MISSION_IDS;
+    global $COMMON_HEADERS;
     logMessage('Completing tasks for all accounts...', "info");
     $tokenData = loadTokenData();
     $proxies = loadProxies();
@@ -383,27 +401,108 @@ function completeTaskAllAccounts() {
 
         $proxy = getRandomProxy($proxies);
 
-        foreach ($MISSION_IDS as $missionId) {
-            $url = TASK_URL($missionId);
-            $headers = array_merge($COMMON_HEADERS, [
-                'Accept'        => '*/*',
-                'Origin'        => 'chrome-extension://effapmdildnpkiaeghlkicpfflpiambm',
-                'Authorization' => "Bearer " . $tokenEntry['accessToken']
-            ]);
+        // Prepare headers for missions list request with authorization
+        $authHeaders = array_merge($COMMON_HEADERS, [
+            'Accept'        => '*/*',
+            'Origin'        => 'chrome-extension://effapmdildnpkiaeghlkicpfflpiambm',
+            'Authorization' => "Bearer " . $tokenEntry['accessToken']
+        ]);
 
-            $response = makeRequest([
-                'url'    => $url,
-                'method' => 'POST',
-                'headers'=> $headers,
-                'proxy'  => $proxy
-            ]);
+        // Retrieve missions list
+        $missionListResponse = makeRequest([
+            'url'     => 'https://api.openloop.so/missions',
+            'method'  => 'GET',
+            'headers' => $authHeaders,
+            'proxy'   => $proxy
+        ]);
 
-            if ($response && isset($response['code']) && $response['code'] === 2000) {
-                logMessage("{$hiddenEmail} Mission {$missionId}: " . $response['message'], "success");
-            } else {
-                $errMsg = isset($response['message']) ? $response['message'] : 'No response';
-                logMessage("{$hiddenEmail} Mission {$missionId} failed: {$errMsg}", "error");
+        if (!$missionListResponse || !isset($missionListResponse['code']) || $missionListResponse['code'] !== 2000) {
+            logMessage("Failed to retrieve missions for {$hiddenEmail}.", "error");
+            continue;
+        }
+
+        if (!isset($missionListResponse['data']['missions']) || !is_array($missionListResponse['data']['missions'])) {
+            logMessage("No missions found for {$hiddenEmail}.", "warning");
+            continue;
+        }
+
+        // Counters for tracking mission statuses
+        $totalAvailable = 0;
+        $completedCount = 0;
+
+        // Process each available mission
+        foreach ($missionListResponse['data']['missions'] as $mission) {
+            if (isset($mission['status']) && $mission['status'] === "available") {
+                $totalAvailable++;
+                $missionId   = $mission['missionId'];
+                $missionName = $mission['name'];
+                $socialLink  = isset($mission['social']['link']) ? $mission['social']['link'] : '';
+
+                logMessage("Account {$hiddenEmail}: Processing Mission {$missionId} - {$missionName}", "process");
+
+                // Step 1: Access the social link if provided
+                if (!empty($socialLink)) {
+                    logMessage("Accessing social link: {$socialLink}", "info");
+                    // Execute GET request to the social link; response is not used
+                    makeRequest([
+                        'url'     => $socialLink,
+                        'method'  => 'GET',
+                        'headers' => $COMMON_HEADERS,
+                        'proxy'   => $proxy
+                    ]);
+                } else {
+                    logMessage("Social link not provided for Mission {$missionId}", "warning");
+                }
+
+                // Step 2: First, send an OPTIONS request without the Authorization header.
+                $optionsHeaders = array_merge($COMMON_HEADERS, [
+                    'Accept'                         => '*/*',
+                    'Origin'                         => 'chrome-extension://effapmdildnpkiaeghlkicpfflpiambm',
+                    'Access-Control-Request-Method'  => 'GET',
+                    'Access-Control-Request-Headers' => 'authorization'
+                    // Authorization header is intentionally omitted.
+                ]);
+
+                $completeUrl = TASK_URL($missionId);
+                logMessage("Sending preflight OPTIONS request for Mission {$missionId}", "info");
+                $optionsResponse = makeRequest([
+                    'url'     => $completeUrl,
+                    'method'  => 'OPTIONS',
+                    'headers' => $optionsHeaders,
+                    'proxy'   => $proxy
+                ]);
+
+                // Wait for 10 seconds as per instructions to simulate delay after preflight.
+                logMessage("Waiting for 10 seconds after OPTIONS request for Mission {$missionId}", "info");
+                sleep(10);
+
+                // Step 3: Send the actual GET request with Authorization header to complete the mission.
+                logMessage("Sending final GET request (with Authorization) for Mission {$missionId}", "info");
+                $completeResponse = makeRequest([
+                    'url'     => $completeUrl,
+                    'method'  => 'GET',
+                    'headers' => $authHeaders,
+                    'proxy'   => $proxy
+                ]);
+
+                if ($completeResponse && isset($completeResponse['code']) && $completeResponse['code'] === 2000) {
+                    logMessage("{$hiddenEmail} Mission {$missionId} completed: " . $completeResponse['message'], "success");
+                    $completedCount++;
+                } else {
+                    $errMsg = isset($completeResponse['message']) ? $completeResponse['message'] : 'No response';
+                    logMessage("{$hiddenEmail} Mission {$missionId} failed: {$errMsg}", "error");
+                }
             }
+        }
+
+        // Log mission completion summary for the account.
+        if ($totalAvailable === 0) {
+            logMessage("{$hiddenEmail}: All tasks have already been completed.", "success");
+        } elseif ($completedCount === $totalAvailable) {
+            logMessage("{$hiddenEmail}: All {$completedCount} available tasks have now been completed.", "success");
+        } else {
+            $remaining = $totalAvailable - $completedCount;
+            logMessage("{$hiddenEmail}: {$completedCount} tasks completed, but {$remaining} task(s) still remain available.", "warning");
         }
     }
 }
