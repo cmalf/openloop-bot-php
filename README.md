@@ -12,7 +12,7 @@ OpenLoop Node Point Mining Automation: Automate OpenLoop point mining with this 
 - Login
 - Multiple Accounts Connection through Proxy
 - Complete All Task
-- Bandwidht Share
+- Bandwidth Share
 
 ## 🔓 Register 
 
